@@ -181,32 +181,33 @@ app.get('/wip/business-units', async (req, res) => {
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// Buscar servicios en todos los BUs en paralelo
+// Buscar servicios — body exacto según documentación WIP
 app.post('/wip/services/search', async (req, res) => {
   try {
     const { subject='', businessUnitId='', pageSize=50, page=0, sort='scheduledDate', sortDirection='Desc' } = req.body;
-    let buIds = [];
-    if (businessUnitId) {
-      buIds = [businessUnitId];
-    } else {
-      const buRes = await wipFetch(`/business/api/v1/BusinessUnit/company/${COMPANY_ID}/business-units/services`);
-      buIds = (buRes.data.businessUnits || []).map(b => b.id);
-      if (!buIds.length) buIds = [''];
-    }
-    const promesas = buIds.map(buId => {
-      const searchBody = { pageSize, page, sort, sortDirection, companyId: COMPANY_ID, subject };
-      if (buId) searchBody.businessUnitId = buId;
-      return wipFetch('/service/api/v1/Service/search', 'POST', searchBody)
-        .then(r => { console.log('[SEARCH] buId:', buId, '→', JSON.stringify(r.data).slice(0,200)); return r.data?.data || []; })
-        .catch(e => { console.error('[SEARCH ERR]', e.message); return []; });
-    });
-    const resultados = await Promise.all(promesas);
-    const seen = new Set();
-    const data = [];
-    resultados.flat().forEach(s => { if (s.id && !seen.has(s.id)) { seen.add(s.id); data.push(s); } });
-    data.sort((a,b) => new Date(b.scheduledDate||0) - new Date(a.scheduledDate||0));
-    res.json({ data, totalRows: data.length });
-  } catch(e) { res.status(500).json({ message: e.message }); }
+
+    // Body exacto según doc WIP v2.3
+    const searchBody = {
+      pageSize: pageSize,
+      page: page,
+      sort: sort,
+      sortDirection: sortDirection,
+      companyId: COMPANY_ID,
+      userId: USER_ID,
+      businessUnitId: businessUnitId,
+      subject: subject
+    };
+
+    console.log('[SEARCH] Body enviado:', JSON.stringify(searchBody));
+    const r = await wipFetch('/service/api/v1/Service/search', 'POST', searchBody);
+    console.log('[SEARCH] Respuesta:', r.status, JSON.stringify(r.data).slice(0,500));
+
+    const data = r.data?.data || [];
+    res.json({ data, totalRows: r.data?.totalRows || data.length });
+  } catch(e) {
+    console.error('[SEARCH FATAL]', e.message);
+    res.status(500).json({ message: e.message });
+  }
 });
 
 // Crear servicio + notificación WhatsApp
