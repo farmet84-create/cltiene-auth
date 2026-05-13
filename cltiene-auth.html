@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CL TIENE — Acceso Seguro</title>
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #111118;
+      --card: #16161f;
+      --border: #2a2a3a;
+      --accent: #4f8ef7;
+      --accent2: #a78bfa;
+      --success: #34d399;
+      --error: #f87171;
+      --text: #f0f0f8;
+      --muted: #7070a0;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Background blobs */
+    body::before, body::after {
+      content: '';
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      opacity: 0.15;
+      pointer-events: none;
+    }
+    body::before {
+      width: 500px; height: 500px;
+      background: var(--accent);
+      top: -100px; left: -100px;
+      animation: drift 12s ease-in-out infinite alternate;
+    }
+    body::after {
+      width: 400px; height: 400px;
+      background: var(--accent2);
+      bottom: -80px; right: -80px;
+      animation: drift 10s ease-in-out infinite alternate-reverse;
+    }
+    @keyframes drift {
+      from { transform: translate(0,0); }
+      to   { transform: translate(40px, 30px); }
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 48px 40px;
+      width: 100%;
+      max-width: 420px;
+      position: relative;
+      z-index: 1;
+      animation: fadeUp .5s ease both;
+    }
+    @keyframes fadeUp {
+      from { opacity:0; transform: translateY(24px); }
+      to   { opacity:1; transform: translateY(0); }
+    }
+
+    /* Logo */
+    .logo {
+      font-family: 'Syne', sans-serif;
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: -0.5px;
+      margin-bottom: 6px;
+    }
+    .logo span { color: var(--accent); }
+
+    .tagline {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 32px;
+    }
+
+    /* Steps indicator */
+    .steps {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      margin-bottom: 32px;
+    }
+    .step-dot {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      border: 2px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Syne', sans-serif;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      transition: all .3s;
+      flex-shrink: 0;
+    }
+    .step-dot.active {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+    .step-dot.done {
+      border-color: var(--success);
+      background: var(--success);
+      color: #fff;
+    }
+    .step-line {
+      flex: 1;
+      height: 2px;
+      background: var(--border);
+      transition: background .4s;
+    }
+    .step-line.done { background: var(--success); }
+
+    /* Phase panels */
+    .phase { display: none; }
+    .phase.active { display: block; animation: fadeUp .4s ease both; }
+
+    .phase-title {
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 20px;
+      margin-bottom: 6px;
+    }
+    .phase-sub {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+
+    /* Inputs */
+    .field { margin-bottom: 16px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; letter-spacing: .5px; text-transform: uppercase; }
+    input[type=text], input[type=tel], input[type=number] {
+      width: 100%;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      padding: 13px 16px;
+      color: var(--text);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus { border-color: var(--accent); }
+    input::placeholder { color: var(--muted); }
+
+    /* OTP inputs */
+    .otp-row {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-bottom: 8px;
+    }
+    .otp-input {
+      width: 52px; height: 58px;
+      text-align: center;
+      font-size: 22px;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
+      outline: none;
+      transition: border-color .2s, transform .1s;
+    }
+    .otp-input:focus { border-color: var(--accent); transform: scale(1.05); }
+    .otp-input.filled { border-color: var(--accent2); }
+
+    /* Button */
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border-radius: 12px;
+      border: none;
+      font-family: 'Syne', sans-serif;
+      font-weight: 700;
+      font-size: 15px;
+      cursor: pointer;
+      transition: opacity .2s, transform .1s;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      letter-spacing: .3px;
+      margin-top: 8px;
+    }
+    .btn:hover { opacity: .9; }
+    .btn:active { transform: scale(.98); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    .btn-ghost {
+      background: transparent;
+      border: 1.5px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+      padding: 10px;
+      margin-top: 8px;
+    }
+    .btn-ghost:hover { border-color: var(--accent); color: var(--accent); opacity: 1; }
+
+    /* Alert */
+    .alert {
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 13px;
+      margin-bottom: 14px;
+      display: none;
+    }
+    .alert.show { display: block; }
+    .alert-err { background: rgba(248,113,113,.1); border: 1px solid rgba(248,113,113,.3); color: var(--error); }
+    .alert-ok  { background: rgba(52,211,153,.1); border: 1px solid rgba(52,211,153,.3); color: var(--success); }
+
+    /* Info box */
+    .info-box {
+      background: rgba(79,142,247,.08);
+      border: 1px solid rgba(79,142,247,.2);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: var(--accent);
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+    .info-box strong { display: block; margin-bottom: 2px; }
+
+    /* Countdown */
+    .countdown { font-size: 13px; color: var(--muted); text-align: center; margin-top: 8px; }
+    .countdown span { color: var(--accent); font-weight: 600; }
+
+    /* Success screen */
+    .success-icon {
+      width: 64px; height: 64px;
+      border-radius: 50%;
+      background: rgba(52,211,153,.15);
+      border: 2px solid var(--success);
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 20px;
+      font-size: 28px;
+      animation: popIn .5s cubic-bezier(.34,1.56,.64,1) both;
+    }
+    @keyframes popIn {
+      from { transform: scale(0); opacity:0; }
+      to   { transform: scale(1); opacity:1; }
+    }
+    .success-name {
+      font-family: 'Syne', sans-serif;
+      font-size: 22px;
+      font-weight: 800;
+      text-align: center;
+      margin-bottom: 6px;
+    }
+    .success-sub { text-align: center; color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+    .info-grid {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .info-item label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 2px; }
+    .info-item span { font-size: 14px; font-weight: 500; }
+
+    .loader {
+      display: inline-block;
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">CL <span>TIENE</span></div>
+  <p class="tagline">Portal de Autenticación Segura</p>
+
+  <!-- Steps -->
+  <div class="steps">
+    <div class="step-dot active" id="sd1">1</div>
+    <div class="step-line" id="sl1"></div>
+    <div class="step-dot" id="sd2">2</div>
+    <div class="step-line" id="sl2"></div>
+    <div class="step-dot" id="sd3">3</div>
+  </div>
+
+  <!-- FASE 1: Documento -->
+  <div class="phase active" id="phase1">
+    <p class="phase-title">Identifícate</p>
+    <p class="phase-sub">Ingresa tu número de documento para verificar tu identidad en el sistema.</p>
+    <div class="alert alert-err" id="err1"></div>
+    <div class="field">
+      <label>Número de Documento</label>
+      <input type="text" id="doc" placeholder="Ej: 1234567890" maxlength="15" />
+    </div>
+    <div class="field">
+      <label>Tipo de Documento</label>
+      <input type="text" id="doctype" placeholder="CC / NIT / CE" maxlength="10" />
+    </div>
+    <button class="btn" onclick="fase1()">Continuar →</button>
+  </div>
+
+  <!-- FASE 2: OTP WhatsApp -->
+  <div class="phase" id="phase2">
+    <p class="phase-title">Código de Verificación</p>
+    <p class="phase-sub" id="phase2sub">Hemos enviado un código de 6 dígitos a tu WhatsApp registrado.</p>
+    <div class="alert alert-ok" id="ok2">✅ Código enviado correctamente.</div>
+    <div class="alert alert-err" id="err2"></div>
+    <div class="info-box" id="phone-box" style="display:none">
+      <strong>📱 WhatsApp:</strong>
+      <span id="phone-display"></span>
+    </div>
+    <div class="otp-row">
+      <input class="otp-input" type="number" maxlength="1" id="o1" oninput="otpNext(this,'o2')" />
+      <input class="otp-input" type="number" maxlength="1" id="o2" oninput="otpNext(this,'o3')" onkeydown="otpBack(event,'o1')" />
+      <input class="otp-input" type="number" maxlength="1" id="o3" oninput="otpNext(this,'o4')" onkeydown="otpBack(event,'o2')" />
+      <input class="otp-input" type="number" maxlength="1" id="o4" oninput="otpNext(this,'o5')" onkeydown="otpBack(event,'o3')" />
+      <input class="otp-input" type="number" maxlength="1" id="o5" oninput="otpNext(this,'o6')" onkeydown="otpBack(event,'o4')" />
+      <input class="otp-input" type="number" maxlength="1" id="o6" oninput="otpFinal(this)" onkeydown="otpBack(event,'o5')" />
+    </div>
+    <p class="countdown" id="countdown"></p>
+    <button class="btn" id="btn-verify" onclick="fase2()">Verificar Código</button>
+    <button class="btn btn-ghost" id="btn-resend" onclick="reenviarCodigo()" disabled>Reenviar código</button>
+  </div>
+
+  <!-- FASE 3: Perfil / Éxito -->
+  <div class="phase" id="phase3">
+    <div class="success-icon">✓</div>
+    <p class="success-name" id="user-name">¡Bienvenido!</p>
+    <p class="success-sub">Identidad verificada correctamente</p>
+    <div class="info-grid" id="user-info"></div>
+    <button class="btn" style="margin-top:20px" onclick="cerrarSesion()">Cerrar Sesión</button>
+  </div>
+</div>
+
+<script>
+// =====================================
+// CONFIG — Apunta a tu backend Node.js
+// =====================================
+const API_BASE = window.location.origin; // mismo servidor
+// Si el backend está en otro host: const API_BASE = 'https://api.tudominio.com';
+
+let userData = {};
+let countdownInterval;
+let tiempoRestante = 120; // segundos
+
+// =========== UTILIDADES ===========
+function showErr(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.classList.add('show');
+}
+function hideErr(id) {
+  document.getElementById(id).classList.remove('show');
+}
+function setStep(n) {
+  [1,2,3].forEach(i => {
+    const dot = document.getElementById('sd'+i);
+    if (i < n) { dot.className='step-dot done'; dot.textContent='✓'; }
+    else if (i === n) { dot.className='step-dot active'; dot.textContent=i; }
+    else { dot.className='step-dot'; dot.textContent=i; }
+    if (i < 3) {
+      const line = document.getElementById('sl'+i);
+      line.className = 'step-line' + (i < n ? ' done' : '');
+    }
+  });
+  [1,2,3].forEach(i => {
+    document.getElementById('phase'+i).className = 'phase' + (i===n?' active':'');
+  });
+}
+
+// =========== OTP ===========
+function otpNext(el, nextId) {
+  el.value = el.value.toString().slice(-1);
+  if (el.value) {
+    el.classList.add('filled');
+    const next = document.getElementById(nextId);
+    if (next) next.focus();
+  } else {
+    el.classList.remove('filled');
+  }
+}
+function otpFinal(el) {
+  el.value = el.value.toString().slice(-1);
+  if (el.value) el.classList.add('filled');
+}
+function otpBack(e, prevId) {
+  if (e.key === 'Backspace' && !e.target.value) {
+    document.getElementById(prevId)?.focus();
+  }
+}
+function getOTP() {
+  return ['o1','o2','o3','o4','o5','o6'].map(id => document.getElementById(id).value).join('');
+}
+
+// =========== COUNTDOWN ===========
+function startCountdown() {
+  tiempoRestante = 120;
+  clearInterval(countdownInterval);
+  document.getElementById('btn-resend').disabled = true;
+  const el = document.getElementById('countdown');
+  countdownInterval = setInterval(() => {
+    tiempoRestante--;
+    const m = Math.floor(tiempoRestante/60);
+    const s = tiempoRestante % 60;
+    el.innerHTML = `Reenviar en <span>${m}:${s.toString().padStart(2,'0')}</span>`;
+    if (tiempoRestante <= 0) {
+      clearInterval(countdownInterval);
+      el.textContent = '';
+      document.getElementById('btn-resend').disabled = false;
+    }
+  }, 1000);
+}
+
+// =========== FASE 1: Validar documento ===========
+async function fase1() {
+  hideErr('err1');
+  const doc = document.getElementById('doc').value.trim();
+  const tipo = document.getElementById('doctype').value.trim().toUpperCase();
+  if (!doc) return showErr('err1', 'Por favor ingresa tu número de documento.');
+  if (!tipo) return showErr('err1', 'Por favor ingresa el tipo de documento.');
+
+  const btn = document.querySelector('#phase1 .btn');
+  btn.innerHTML = '<span class="loader"></span>Verificando...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/validate-document`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ documento: doc, tipo_documento: tipo })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      userData = data.user || {};
+      const phoneBox = document.getElementById('phone-box');
+      if (userData.telefono) {
+        const masked = userData.telefono.slice(0,-4).replace(/./g,'*') + userData.telefono.slice(-4);
+        document.getElementById('phone-display').textContent = masked;
+        phoneBox.style.display = 'block';
+      }
+      // Enviar código
+      await enviarCodigo(doc, tipo);
+      setStep(2);
+      document.getElementById('ok2').classList.add('show');
+      startCountdown();
+    } else {
+      showErr('err1', data.message || 'Documento no encontrado en el sistema.');
+    }
+  } catch(e) {
+    // MODO DEMO si no hay backend
+    console.warn('Backend no disponible, modo demo activado');
+    userData = { nombre:'Usuario Demo', telefono:'+57300XXXXXXXX', plan:'Básico', estado:'Activo' };
+    document.getElementById('phone-display').textContent = '+573*****678';
+    document.getElementById('phone-box').style.display = 'block';
+    setStep(2);
+    document.getElementById('ok2').classList.add('show');
+    startCountdown();
+  } finally {
+    btn.innerHTML = 'Continuar →';
+    btn.disabled = false;
+  }
+}
+
+async function enviarCodigo(doc, tipo) {
+  try {
+    await fetch(`${API_BASE}/api/auth/send-code`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ documento: doc, tipo_documento: tipo })
+    });
+  } catch(e) { /* modo demo */ }
+}
+
+// =========== FASE 2: Verificar OTP ===========
+async function fase2() {
+  hideErr('err2');
+  const code = getOTP();
+  if (code.length < 6) return showErr('err2', 'Ingresa los 6 dígitos del código.');
+
+  const btn = document.getElementById('btn-verify');
+  btn.innerHTML = '<span class="loader"></span>Verificando...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/verify-code`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        documento: document.getElementById('doc').value.trim(),
+        codigo: code
+      })
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      mostrarPerfil(data.user || userData);
+      clearInterval(countdownInterval);
+      setStep(3);
+    } else {
+      showErr('err2', data.message || 'Código incorrecto. Inténtalo de nuevo.');
+    }
+  } catch(e) {
+    // MODO DEMO: código 123456
+    if (code === '123456') {
+      mostrarPerfil(userData);
+      clearInterval(countdownInterval);
+      setStep(3);
+    } else {
+      showErr('err2', 'Código incorrecto. (Demo: usa 123456)');
+    }
+  } finally {
+    btn.innerHTML = 'Verificar Código';
+    btn.disabled = false;
+  }
+}
+
+async function reenviarCodigo() {
+  document.getElementById('btn-resend').disabled = true;
+  ['o1','o2','o3','o4','o5','o6'].forEach(id => {
+    const el = document.getElementById(id);
+    el.value = ''; el.classList.remove('filled');
+  });
+  hideErr('err2');
+  document.getElementById('ok2').classList.remove('show');
+  const doc = document.getElementById('doc').value.trim();
+  const tipo = document.getElementById('doctype').value.trim().toUpperCase();
+  await enviarCodigo(doc, tipo);
+  document.getElementById('ok2').classList.add('show');
+  startCountdown();
+}
+
+// =========== FASE 3: Perfil ===========
+function mostrarPerfil(user) {
+  document.getElementById('user-name').textContent = '¡Hola, ' + (user.nombre || 'Usuario') + '!';
+  const grid = document.getElementById('user-info');
+  const items = [
+    { label: 'Documento', value: document.getElementById('doc').value },
+    { label: 'Teléfono', value: user.telefono || '—' },
+    { label: 'Plan', value: user.plan || '—' },
+    { label: 'Estado', value: user.estado || 'Activo' },
+  ];
+  grid.innerHTML = items.map(i =>
+    `<div class="info-item"><label>${i.label}</label><span>${i.value}</span></div>`
+  ).join('');
+}
+
+function cerrarSesion() {
+  userData = {};
+  ['o1','o2','o3','o4','o5','o6'].forEach(id => {
+    const el = document.getElementById(id);
+    el.value=''; el.classList.remove('filled');
+  });
+  document.getElementById('doc').value='';
+  document.getElementById('doctype').value='';
+  hideErr('err1'); hideErr('err2');
+  document.getElementById('ok2').classList.remove('show');
+  document.getElementById('phone-box').style.display='none';
+  clearInterval(countdownInterval);
+  document.getElementById('countdown').textContent='';
+  setStep(1);
+}
+</script>
+</body>
+</html>
