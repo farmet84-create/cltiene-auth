@@ -193,10 +193,13 @@ app.post('/wip/services/search', async (req, res) => {
       buIds = (buRes.data.businessUnits || []).map(b => b.id);
       if (!buIds.length) buIds = [''];
     }
-    const promesas = buIds.map(buId =>
-      wipFetch('/service/api/v1/Service/search', 'POST', { pageSize, page, sort, sortDirection, companyId: COMPANY_ID, userId: USER_ID, subject, businessUnitId: buId })
-        .then(r => r.data?.data || []).catch(() => [])
-    );
+    const promesas = buIds.map(buId => {
+      const searchBody = { pageSize, page, sort, sortDirection, companyId: COMPANY_ID, subject };
+      if (buId) searchBody.businessUnitId = buId;
+      return wipFetch('/service/api/v1/Service/search', 'POST', searchBody)
+        .then(r => { console.log('[SEARCH] buId:', buId, '→', JSON.stringify(r.data).slice(0,200)); return r.data?.data || []; })
+        .catch(e => { console.error('[SEARCH ERR]', e.message); return []; });
+    });
     const resultados = await Promise.all(promesas);
     const seen = new Set();
     const data = [];
