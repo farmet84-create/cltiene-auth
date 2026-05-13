@@ -1,8 +1,3 @@
-/**
- * CLTIENE — WIP Dashboard Server
- * Proxy completo para todos los endpoints de la API WIP v2.3
- */
-
 require('dotenv').config();
 const express = require('express');
 const path    = require('path');
@@ -21,13 +16,21 @@ app.use(express.static(__dirname));
 app.get('/',    (req, res) => res.sendFile(path.join(__dirname, 'wip-dashboard.html')));
 app.get('/auth',(req, res) => res.sendFile(path.join(__dirname, 'cltiene-auth.html')));
 
-async function wipFetch(path, method = 'GET', body = null) {
+async function wipFetch(wipPath, method = 'GET', body = null) {
   const nodeFetch = (await import('node-fetch')).default;
-  const opts = { method, headers: { 'Authorization': WIP_KEY, 'Content-Type': 'application/json' } };
+  const url = WIP_BASE + wipPath;
+  console.log(`[WIP] ${method} ${url}`);
+  const opts = {
+    method,
+    headers: { 'Authorization': WIP_KEY, 'Content-Type': 'application/json' }
+  };
   if (body) opts.body = JSON.stringify(body);
-  const res  = await nodeFetch(WIP_BASE + path, opts);
+  const res  = await nodeFetch(url, opts);
   const text = await res.text();
-  let data; try { data = JSON.parse(text); } catch { data = { raw: text }; }
+  console.log(`[WIP] Status: ${res.status} | Response: ${text.slice(0, 200)}`);
+  let data;
+  try { data = JSON.parse(text); }
+  catch { data = { raw: text, status: res.status }; }
   return { ok: res.ok, status: res.status, data };
 }
 
@@ -39,7 +42,25 @@ app.get('/wip/business-units', async (req, res) => {
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// 2. Crear servicio
+// 2. Buscar servicios — DEBE ir ANTES de /:id
+app.post('/wip/services/search', async (req, res) => {
+  try {
+    const body = {
+      pageSize: req.body.pageSize || 20,
+      page: req.body.page || 0,
+      sort: req.body.sort || 'scheduledDate',
+      sortDirection: req.body.sortDirection || 'Desc',
+      companyId: COMPANY_ID,
+      userId: USER_ID,
+      subject: req.body.subject || '',
+      businessUnitId: req.body.businessUnitId || ''
+    };
+    const r = await wipFetch('/service/api/v1/Service/search', 'POST', body);
+    res.status(r.status).json(r.data);
+  } catch(e) { res.status(500).json({ message: e.message }); }
+});
+
+// 3. Crear servicio
 app.post('/wip/services/create', async (req, res) => {
   try {
     const r = await wipFetch(`/service/api/v2/Service/${COMPANY_ID}/service/${USER_ID}`, 'POST', req.body);
@@ -47,19 +68,10 @@ app.post('/wip/services/create', async (req, res) => {
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// 3. Buscar por ID
+// 4. Buscar por ID — DEBE ir DESPUÉS de /search y /create
 app.get('/wip/services/:id', async (req, res) => {
   try {
     const r = await wipFetch(`/service/api/v1/Service/${req.params.id}`);
-    res.status(r.status).json(r.data);
-  } catch(e) { res.status(500).json({ message: e.message }); }
-});
-
-// 4. Buscar servicios
-app.post('/wip/services/search', async (req, res) => {
-  try {
-    const body = { pageSize: req.body.pageSize||20, page: req.body.page||0, sort: req.body.sort||'scheduledDate', sortDirection: req.body.sortDirection||'Desc', companyId: COMPANY_ID, userId: USER_ID, subject: req.body.subject||'', businessUnitId: req.body.businessUnitId||'' };
-    const r = await wipFetch('/service/api/v1/Service/search', 'POST', body);
     res.status(r.status).json(r.data);
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
@@ -78,7 +90,12 @@ app.get('/wip/subscriptions', async (req, res) => {
 // 6. Detalle suscripción
 app.post('/wip/subscriptions/detail', async (req, res) => {
   try {
-    const body = { customerId: req.body.customerId, businessUnitId: req.body.businessUnitId, timeZone: 'America/Bogota', companyId: COMPANY_ID };
+    const body = {
+      customerId: req.body.customerId,
+      businessUnitId: req.body.businessUnitId,
+      timeZone: 'America/Bogota',
+      companyId: COMPANY_ID
+    };
     const r = await wipFetch('/Customer/api/v1/Customer/Subscription/Consumption', 'POST', body);
     res.status(r.status).json(r.data);
   } catch(e) { res.status(500).json({ message: e.message }); }
