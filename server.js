@@ -13,7 +13,7 @@ const BU_OWNER_ID = process.env.WIP_BUOWNER_ID || '67379dff213b73f99523f061';
 app.use(express.json());
 app.use(express.static(__dirname));
 
-app.get('/',    (req, res) => res.sendFile(path.join(__dirname, 'wip-dashboard.html')));
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'wip-dashboard.html')));
 app.get('/auth',(req, res) => res.sendFile(path.join(__dirname, 'cltiene-auth.html')));
 
 async function wipFetch(wipPath, method = 'GET', body = null) {
