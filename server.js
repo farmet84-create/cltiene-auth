@@ -1,267 +1,231 @@
-require('dotenv').config();
+ require('dotenv').config();
 const express = require('express');
 const path    = require('path');
-const crypto  = require('crypto');
 const app     = express();
 const PORT    = process.env.PORT || 3000;
 
-// ── Config WIP ────────────────────────────────────────────────────────────────
 const WIP_BASE   = 'https://api.wiptool.com';
 const WIP_KEY    = process.env.WIP_API_KEY    || 'xWjGb5Zt84g4YEBEe4C8ZxNWkVswJg7ZRbkLwJeQ';
 const COMPANY_ID = process.env.WIP_COMPANY_ID || '67379dff213b73f99523f061';
 const USER_ID    = process.env.WIP_USER_ID    || '67a0dcadba440e5f0db90ccc';
-
-// ── Config WhatsApp (whapi.cloud) ─────────────────────────────────────────────
-const WA_URL   = process.env.WHAPI_URL   || 'https://gate.whapi.cloud';
-const WA_TOKEN = process.env.WHAPI_TOKEN || 'WwW3UAz2x6iJ0nasEd7ar5WFoVsxnGpc';
-const WA_NUM   = process.env.WHAPI_NUM   || '573185159138';
+const WA_URL     = process.env.WHAPI_URL      || 'https://gate.whapi.cloud';
+const WA_TOKEN   = process.env.WHAPI_TOKEN    || 'WwW3UAz2x6iJ0nasEd7ar5WFoVsxnGpc';
 
 app.use(express.json());
 
-// ── Rutas HTML ─────────────────────────────────────────────────────────────────
-app.get('/',                  (req, res) => res.sendFile(path.join(__dirname, 'wip-dashboard.html')));
-app.get('/wip-dashboard.html',(req, res) => res.sendFile(path.join(__dirname, 'wip-dashboard.html')));
-app.get('/auth',              (req, res) => res.sendFile(path.join(__dirname, 'cltiene-auth.html')));
-app.get('/cltiene-auth.html', (req, res) => res.sendFile(path.join(__dirname, 'cltiene-auth.html')));
+app.get('/',                   (req, res) => res.sendFile(path.join(__dirname, 'wip-dashboard.html')));
+app.get('/wip-dashboard.html', (req, res) => res.sendFile(path.join(__dirname, 'wip-dashboard.html')));
+app.get('/auth',               (req, res) => res.sendFile(path.join(__dirname, 'cltiene-auth.html')));
+app.get('/cltiene-auth.html',  (req, res) => res.sendFile(path.join(__dirname, 'cltiene-auth.html')));
 
-// ════════════════════════════════════════════════════════════════════════════
-// HELPERS
-// ════════════════════════════════════════════════════════════════════════════
-
-async function wipFetch(wipPath, method = 'GET', body = null) {
+// ── Helper WIP ────────────────────────────────────────────────────────────────
+async function wipFetch(wipPath, method, body) {
+  method = method || 'GET';
   const nodeFetch = (await import('node-fetch')).default;
   const opts = { method, headers: { 'Authorization': WIP_KEY, 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
   const res  = await nodeFetch(WIP_BASE + wipPath, opts);
   const text = await res.text();
-  console.log(`[WIP] ${method} ${wipPath} → ${res.status} | ${text.slice(0,200)}`);
-  let data; try { data = JSON.parse(text); } catch { data = { raw: text }; }
-  return { ok: res.ok, status: res.status, data };
+  let data;
+  try { data = JSON.parse(text); } catch(e) { data = { raw: text }; }
+  return { ok: res.ok, status: res.status, data: data };
 }
 
-// Enviar mensaje WhatsApp via whapi.cloud
-async function sendWhatsApp(telefono, mensaje) {
-  const nodeFetch = (await import('node-fetch')).default;
-  // Normalizar número: quitar +, espacios, guiones
-  let num = telefono.toString().replace(/[\s\-\+\(\)]/g, '');
-  if (num.startsWith('0')) num = '57' + num.slice(1);
-  if (!num.startsWith('57') && num.length === 10) num = '57' + num;
-  const to = num + '@s.whatsapp.net';
-
+// ── Helper WhatsApp ───────────────────────────────────────────────────────────
+async function sendWA(tel, msg) {
   try {
-    const res = await nodeFetch(`${WA_URL}/messages/text`, {
+    const nodeFetch = (await import('node-fetch')).default;
+    let num = tel.toString().replace(/[\s\-\+\(\)]/g, '');
+    if (num.length === 10) num = '57' + num;
+    const res = await nodeFetch(WA_URL + '/messages/text', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${WA_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to, body: mensaje })
+      headers: { 'Authorization': 'Bearer ' + WA_TOKEN, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to: num + '@s.whatsapp.net', body: msg })
     });
     const data = await res.json();
-    console.log(`[WhatsApp] → ${num}: ${res.status}`, JSON.stringify(data).slice(0,150));
-    return { ok: res.ok, data };
+    console.log('[WA]', num, res.status);
+    return { ok: res.ok, data: data };
   } catch(e) {
-    console.error('[WhatsApp] Error:', e.message);
-    return { ok: false, error: e.message };
+    console.error('[WA Error]', e.message);
+    return { ok: false };
   }
 }
 
-// OTP store en memoria { documento: { code, expires, attempts } }
+// OTP store
 const otpStore = new Map();
-function generarOTP() { return Math.floor(100000 + Math.random() * 900000).toString(); }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 1. AUTENTICACIÓN OTP CON WHATSAPP
+// AUTH
 // ════════════════════════════════════════════════════════════════════════════
 
-// Validar documento → busca en WIP y retorna teléfono
 app.post('/api/auth/validate-document', async (req, res) => {
-  const { documento } = req.body;
-  if (!documento) return res.status(400).json({ success: false, message: 'Documento requerido' });
-
+  const doc = req.body.documento;
+  if (!doc) return res.status(400).json({ success: false, message: 'Documento requerido' });
   try {
-    // Buscar en todos los BUs
-    const buRes = await wipFetch(`/business/api/v1/BusinessUnit/company/${COMPANY_ID}/business-units/services`);
-    const buIds = (buRes.data.businessUnits || []).map(b => b.id);
-
+    const buRes = await wipFetch('/business/api/v1/BusinessUnit/company/' + COMPANY_ID + '/business-units/services');
+    const buIds = (buRes.data.businessUnits || []).map(function(b) { return b.id; });
     const nodeFetch = (await import('node-fetch')).default;
-    const promesas = buIds.map(buId =>
-      nodeFetch(`${WIP_BASE}/Customer/api/v1/Customer/Subscription?companyId=${COMPANY_ID}&businessUnitId=${buId}&searchTerm=${encodeURIComponent(documento)}`, {
+    const promesas = buIds.map(function(buId) {
+      return nodeFetch(WIP_BASE + '/Customer/api/v1/Customer/Subscription?companyId=' + COMPANY_ID + '&businessUnitId=' + buId + '&searchTerm=' + encodeURIComponent(doc), {
         headers: { 'Authorization': WIP_KEY, 'Content-Type': 'application/json' }
-      }).then(r => r.json()).catch(() => null)
-    );
+      }).then(function(r) { return r.json(); }).catch(function() { return null; });
+    });
     const resultados = await Promise.all(promesas);
     const clientes = [];
-    resultados.forEach(r => {
-      const items = Array.isArray(r) ? r : (r?.id ? [r] : []);
-      items.forEach(c => { if (!clientes.find(x => x.id === c.id)) clientes.push(c); });
+    resultados.forEach(function(r) {
+      const items = Array.isArray(r) ? r : (r && r.id ? [r] : []);
+      items.forEach(function(c) { if (!clientes.find(function(x) { return x.id === c.id; })) clientes.push(c); });
     });
-
     if (!clientes.length) return res.status(404).json({ success: false, message: 'Documento no encontrado en el sistema.' });
-
     const cliente = clientes[0];
-    const telefono = cliente.phone || '';
-    const masked = telefono ? telefono.slice(0,-4).replace(/\d/g,'*') + telefono.slice(-4) : null;
-
-    res.json({
-      success: true,
-      user: { nombre: cliente.name, telefono: masked, tieneWhatsApp: !!telefono },
-      _tel: telefono // se usa en send-code
-    });
+    const tel = cliente.phone || '';
+    const masked = tel ? tel.slice(0, -4).replace(/\d/g, '*') + tel.slice(-4) : null;
+    res.json({ success: true, user: { nombre: cliente.name, telefono: masked, tieneWhatsApp: !!tel } });
   } catch(e) {
     res.status(500).json({ success: false, message: e.message });
   }
 });
 
-// Enviar OTP por WhatsApp
 app.post('/api/auth/send-code', async (req, res) => {
-  const { documento } = req.body;
-  if (!documento) return res.status(400).json({ success: false, message: 'Documento requerido' });
-
-  // Anti-spam
-  const existing = otpStore.get(documento);
+  const doc = req.body.documento;
+  if (!doc) return res.status(400).json({ success: false, message: 'Documento requerido' });
+  const existing = otpStore.get(doc);
   if (existing && Date.now() < existing.expires - 90000) {
     return res.status(429).json({ success: false, message: 'Espera antes de solicitar otro código.' });
   }
-
   try {
-    // Obtener teléfono del cliente
-    const buRes = await wipFetch(`/business/api/v1/BusinessUnit/company/${COMPANY_ID}/business-units/services`);
-    const buIds = (buRes.data.businessUnits || []).map(b => b.id);
+    const buRes = await wipFetch('/business/api/v1/BusinessUnit/company/' + COMPANY_ID + '/business-units/services');
+    const buIds = (buRes.data.businessUnits || []).map(function(b) { return b.id; });
     const nodeFetch = (await import('node-fetch')).default;
-    const promesas = buIds.map(buId =>
-      nodeFetch(`${WIP_BASE}/Customer/api/v1/Customer/Subscription?companyId=${COMPANY_ID}&businessUnitId=${buId}&searchTerm=${encodeURIComponent(documento)}`, {
+    const promesas = buIds.map(function(buId) {
+      return nodeFetch(WIP_BASE + '/Customer/api/v1/Customer/Subscription?companyId=' + COMPANY_ID + '&businessUnitId=' + buId + '&searchTerm=' + encodeURIComponent(doc), {
         headers: { 'Authorization': WIP_KEY, 'Content-Type': 'application/json' }
-      }).then(r => r.json()).catch(() => null)
-    );
+      }).then(function(r) { return r.json(); }).catch(function() { return null; });
+    });
     const resultados = await Promise.all(promesas);
     let telefono = '', nombre = '';
-    resultados.forEach(r => {
-      const items = Array.isArray(r) ? r : (r?.id ? [r] : []);
-      items.forEach(c => { if (!telefono && c.phone) { telefono = c.phone; nombre = c.name; } });
+    resultados.forEach(function(r) {
+      const items = Array.isArray(r) ? r : (r && r.id ? [r] : []);
+      items.forEach(function(c) { if (!telefono && c.phone) { telefono = c.phone; nombre = c.name; } });
     });
-
-    if (!telefono) return res.status(404).json({ success: false, message: 'No se encontró número de WhatsApp para este documento.' });
-
-    const code = generarOTP();
-    otpStore.set(documento, { code, expires: Date.now() + 2 * 60 * 1000, attempts: 0, telefono, nombre });
-
-    const msg = `🔐 *CL TIENE — Código de Verificación*\n\nHola ${nombre}, tu código es:\n\n*${code}*\n\nVálido por 2 minutos. No lo compartas con nadie.\n\n_MULTISERVICIOS CL TIENE_`;
-    const wa = await sendWhatsApp(telefono, msg);
-
-    res.json({ success: true, message: 'Código enviado por WhatsApp.', demo: !wa.ok });
+    if (!telefono) return res.status(404).json({ success: false, message: 'No hay número WhatsApp registrado.' });
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    otpStore.set(doc, { code: code, expires: Date.now() + 120000, attempts: 0, telefono: telefono, nombre: nombre });
+    const msg = '🔐 *CL TIENE — Código de Verificación*\n\nHola ' + nombre + ', tu código es:\n\n*' + code + '*\n\nVálido por 2 minutos.\n\n_MULTISERVICIOS CL TIENE_';
+    const wa = await sendWA(telefono, msg);
+    res.json({ success: true, message: 'Código enviado.', demo: !wa.ok });
   } catch(e) {
     res.status(500).json({ success: false, message: e.message });
   }
 });
 
-// Verificar OTP
 app.post('/api/auth/verify-code', async (req, res) => {
-  const { documento, codigo } = req.body;
-  const stored = otpStore.get(documento);
+  const doc = req.body.documento, codigo = req.body.codigo;
+  const stored = otpStore.get(doc);
   if (!stored) return res.status(400).json({ success: false, message: 'No hay código activo.' });
-  if (Date.now() > stored.expires) { otpStore.delete(documento); return res.status(400).json({ success: false, message: 'Código expirado.' }); }
-  if (stored.attempts >= 3) { otpStore.delete(documento); return res.status(429).json({ success: false, message: 'Demasiados intentos.' }); }
-  if (stored.code !== codigo?.trim()) {
+  if (Date.now() > stored.expires) { otpStore.delete(doc); return res.status(400).json({ success: false, message: 'Código expirado.' }); }
+  if (stored.attempts >= 3) { otpStore.delete(doc); return res.status(429).json({ success: false, message: 'Demasiados intentos.' }); }
+  if (stored.code !== String(codigo).trim()) {
     stored.attempts++;
-    return res.status(400).json({ success: false, message: `Código incorrecto. ${3 - stored.attempts} intentos restantes.` });
+    return res.status(400).json({ success: false, message: 'Código incorrecto. ' + (3 - stored.attempts) + ' intentos restantes.' });
   }
-  otpStore.delete(documento);
-  // Confirmación por WhatsApp
-  sendWhatsApp(stored.telefono, `✅ *CL TIENE*\n\nHola ${stored.nombre}, tu acceso ha sido verificado exitosamente.\n\n_MULTISERVICIOS CL TIENE_`);
+  otpStore.delete(doc);
+  sendWA(stored.telefono, '✅ *CL TIENE*\n\nHola ' + stored.nombre + ', acceso verificado exitosamente.\n\n_MULTISERVICIOS CL TIENE_');
   res.json({ success: true, message: 'Autenticación exitosa.', user: { nombre: stored.nombre } });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
-// 2. PROXY WIP
+// WIP PROXY
 // ════════════════════════════════════════════════════════════════════════════
 
-// Unidades de negocio
 app.get('/wip/business-units', async (req, res) => {
   try {
-    const r = await wipFetch(`/business/api/v1/BusinessUnit/company/${COMPANY_ID}/business-units/services`);
+    const r = await wipFetch('/business/api/v1/BusinessUnit/company/' + COMPANY_ID + '/business-units/services');
     res.status(r.status).json(r.data);
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// Buscar servicios
+// Búsqueda — prueba múltiples formatos
 app.post('/wip/services/search', async (req, res) => {
   try {
-    const { subject='', businessUnitId='', pageSize=50, page=0, sort='scheduledDate', sortDirection='Desc' } = req.body;
+    const subject      = req.body.subject      || '';
+    const businessUnitId = req.body.businessUnitId || '';
+    const pageSize     = req.body.pageSize     || 50;
+    const page         = req.body.page         || 0;
+    const sort         = req.body.sort         || 'scheduledDate';
+    const sortDirection= req.body.sortDirection|| 'Desc';
 
-    // Intentar 3 formatos distintos hasta que uno funcione
-    const attempts = [
-      // Formato 1: subject directo
-      { pageSize, page, sort, sortDirection, companyId: COMPANY_ID, userId: USER_ID, businessUnitId, subject },
-      // Formato 2: filterValue con customerDocument
-      { pageSize, page, sort, sortDirection, companyId: COMPANY_ID, userId: USER_ID, businessUnitId,
-        filterValue: subject ? [{ property: 'customerDocument', value: [subject], operator: 'Equal' }] : [] },
-      // Formato 3: filterValue con userName
-      { pageSize, page, sort, sortDirection, companyId: COMPANY_ID, userId: USER_ID, businessUnitId,
-        filterValue: subject ? [{ property: 'userName', value: [subject], operator: 'Contains' }] : [] },
-    ];
-
-    let data = [];
-    let totalRows = 0;
-    for (const [i, body] of attempts.entries()) {
-      console.log(`[SEARCH] Intento ${i+1}:`, JSON.stringify(body));
-      const r = await wipFetch('/service/api/v1/Service/search', 'POST', body);
-      console.log(`[SEARCH] Respuesta ${i+1}:`, r.status, JSON.stringify(r.data).slice(0,400));
-      if (r.ok && r.data?.data?.length > 0) {
-        data = r.data.data;
-        totalRows = r.data.totalRows || data.length;
-        console.log(`[SEARCH] ✅ Formato ${i+1} funcionó, ${data.length} resultados`);
-        break;
-      }
+    // Formato 1: subject
+    const body1 = { pageSize: pageSize, page: page, sort: sort, sortDirection: sortDirection, companyId: COMPANY_ID, userId: USER_ID, businessUnitId: businessUnitId, subject: subject };
+    const r1 = await wipFetch('/service/api/v1/Service/search', 'POST', body1);
+    console.log('[S1]', r1.status, JSON.stringify(r1.data).slice(0, 300));
+    if (r1.ok && r1.data && r1.data.data && r1.data.data.length > 0) {
+      return res.json({ data: r1.data.data, totalRows: r1.data.totalRows || r1.data.data.length });
     }
 
-    res.json({ data, totalRows });
+    // Formato 2: filterValue customerDocument
+    const body2 = { pageSize: pageSize, page: page, sort: sort, sortDirection: sortDirection, companyId: COMPANY_ID, userId: USER_ID,
+      filterValue: subject ? [{ property: 'customerDocument', value: [subject], operator: 'Equal' }] : [] };
+    const r2 = await wipFetch('/service/api/v1/Service/search', 'POST', body2);
+    console.log('[S2]', r2.status, JSON.stringify(r2.data).slice(0, 300));
+    if (r2.ok && r2.data && r2.data.data && r2.data.data.length > 0) {
+      return res.json({ data: r2.data.data, totalRows: r2.data.totalRows || r2.data.data.length });
+    }
+
+    // Formato 3: sin subject (traer todos)
+    const body3 = { pageSize: pageSize, page: page, sort: sort, sortDirection: sortDirection, companyId: COMPANY_ID, userId: USER_ID };
+    const r3 = await wipFetch('/service/api/v1/Service/search', 'POST', body3);
+    console.log('[S3]', r3.status, JSON.stringify(r3.data).slice(0, 300));
+    if (r3.ok && r3.data && r3.data.data) {
+      const all = r3.data.data;
+      const filtered = subject ? all.filter(function(s) {
+        return (s.customerDocument && s.customerDocument.includes(subject)) ||
+               (s.finalClientName && s.finalClientName.toLowerCase().includes(subject.toLowerCase())) ||
+               (s.plate && s.plate.toLowerCase().includes(subject.toLowerCase()));
+      }) : all;
+      return res.json({ data: filtered, totalRows: filtered.length });
+    }
+
+    res.json({ data: [], totalRows: 0, debug: { s1: r1.status, s2: r2.status, s3: r3.status } });
   } catch(e) {
-    console.error('[SEARCH FATAL]', e.message);
-    res.status(500).json({ message: e.message });
-  }
-});
-  } catch(e) {
-    console.error('[SEARCH FATAL]', e.message);
+    console.error('[SEARCH]', e.message);
     res.status(500).json({ message: e.message });
   }
 });
 
-// Crear servicio + notificación WhatsApp
+// Crear servicio + WhatsApp
 app.post('/wip/services/create', async (req, res) => {
   try {
-    const r = await wipFetch(`/service/api/v2/Service/${COMPANY_ID}/service/${USER_ID}`, 'POST', req.body);
+    const r = await wipFetch('/service/api/v2/Service/' + COMPANY_ID + '/service/' + USER_ID, 'POST', req.body);
     if (r.ok) {
-      // Notificar al cliente por WhatsApp
-      const tel = req.body.userClientePhone || req.body.userPhone || '';
-      const nombre = req.body.finalClientName || req.body.userName || 'Cliente';
-      const tipo = req.body.type || 'Servicio';
-      const expediente = r.data.wipExpedient || r.data.id || '';
-      const fecha = req.body.scheduledDate ? new Date(req.body.scheduledDate).toLocaleString('es-CO', { timeZone: 'America/Bogota', dateStyle: 'medium', timeStyle: 'short' }) : '';
+      const tel    = req.body.userClientePhone || req.body.userPhone || '';
+      const nombre = req.body.finalClientName  || req.body.userName  || 'Cliente';
+      const tipo   = req.body.type || 'Servicio';
+      const exp    = r.data.wipExpedient || r.data.id || '';
       if (tel) {
-        const msg = `✅ *CL TIENE — Servicio Registrado*\n\nHola ${nombre},\n\nTu solicitud ha sido registrada exitosamente:\n\n📋 *Expediente:* ${expediente}\n🔧 *Servicio:* ${tipo}\n📅 *Fecha:* ${fecha}\n\nNuestro equipo se pondrá en contacto contigo pronto.\n\n_MULTISERVICIOS CL TIENE_`;
-        sendWhatsApp(tel, msg);
+        sendWA(tel, '✅ *CL TIENE — Servicio Registrado*\n\nHola ' + nombre + ',\n\n📋 Expediente: ' + exp + '\n🔧 Servicio: ' + tipo + '\n\nNuestro equipo se pondrá en contacto pronto.\n\n_MULTISERVICIOS CL TIENE_');
       }
     }
     res.status(r.status).json(r.data);
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// Buscar por ID
 app.get('/wip/services/:id', async (req, res) => {
   try {
-    const r = await wipFetch(`/service/api/v1/Service/${req.params.id}`);
+    const r = await wipFetch('/service/api/v1/Service/' + req.params.id);
     res.status(r.status).json(r.data);
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// Suscripciones
 app.get('/wip/subscriptions', async (req, res) => {
   try {
-    const { businessUnitId='', searchTerm='' } = req.query;
-    const r = await wipFetch(`/Customer/api/v1/Customer/Subscription?companyId=${COMPANY_ID}&businessUnitId=${businessUnitId}&searchTerm=${encodeURIComponent(searchTerm)}`);
+    const buId = req.query.businessUnitId || '';
+    const term = req.query.searchTerm || '';
+    const r = await wipFetch('/Customer/api/v1/Customer/Subscription?companyId=' + COMPANY_ID + '&businessUnitId=' + buId + '&searchTerm=' + encodeURIComponent(term));
     res.status(r.status).json(r.data);
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// Detalle suscripción
 app.post('/wip/subscriptions/detail', async (req, res) => {
   try {
     const r = await wipFetch('/Customer/api/v1/Customer/Subscription/Consumption', 'POST', {
@@ -272,83 +236,41 @@ app.post('/wip/subscriptions/detail', async (req, res) => {
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// ════════════════════════════════════════════════════════════════════════════
-// 3. WEBHOOK — Notificar cambio de estado por WhatsApp
-// ════════════════════════════════════════════════════════════════════════════
 app.post('/wip/webhook', async (req, res) => {
   try {
-    const { id, status, finalClientName, userClientePhone, plate, wipExpedient } = req.body;
     const r = await wipFetch('/status', 'POST', req.body);
-
-    // Notificar al cliente por WhatsApp
-    if (userClientePhone) {
-      const statusMap = {
-        Pending:    '🕐 *Pendiente* — Tu servicio está en espera de asignación.',
-        InProgress: '🔧 *En Progreso* — Un técnico está atendiendo tu solicitud.',
-        Done:       '✅ *Finalizado* — Tu servicio ha sido completado exitosamente.',
-        Cancelled:  '❌ *Cancelado* — Tu servicio ha sido cancelado.',
-      };
-      const statusMsg = statusMap[status] || `Estado actualizado: ${status}`;
-      const msg = `📡 *CL TIENE — Actualización de Servicio*\n\nHola ${finalClientName || 'Cliente'},\n\n${statusMsg}\n\n📋 Expediente: ${wipExpedient || id}\n🚗 Placa: ${plate || '—'}\n\n_MULTISERVICIOS CL TIENE_`;
-      sendWhatsApp(userClientePhone, msg);
+    const tel = req.body.userClientePhone || '';
+    if (tel) {
+      const statusMap = { Pending: '🕐 Pendiente', InProgress: '🔧 En Progreso', Done: '✅ Finalizado', Cancelled: '❌ Cancelado' };
+      sendWA(tel, '📡 *CL TIENE*\n\nEstado actualizado: ' + (statusMap[req.body.status] || req.body.status) + '\nExpediente: ' + (req.body.wipExpedient || req.body.id || '') + '\n\n_MULTISERVICIOS CL TIENE_');
     }
-
     res.status(r.status).json(r.data);
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// Endpoint manual para notificar estado
-app.post('/api/notify', async (req, res) => {
-  const { telefono, mensaje } = req.body;
-  if (!telefono || !mensaje) return res.status(400).json({ success: false, message: 'telefono y mensaje requeridos' });
-  const result = await sendWhatsApp(telefono, mensaje);
-  res.json({ success: result.ok, ...result });
-});
-
-// Diagnóstico — prueba el endpoint de búsqueda con diferentes formatos
+// Diagnóstico
 app.get('/api/diag', async (req, res) => {
-  const resultados = {};
+  const out = {};
+  const b1 = { pageSize: 5, page: 0, sort: 'scheduledDate', sortDirection: 'Desc', companyId: COMPANY_ID, userId: USER_ID, subject: '1000988807' };
+  const t1 = await wipFetch('/service/api/v1/Service/search', 'POST', b1).catch(function(e) { return { status: 0, data: { err: e.message } }; });
+  out.fmt1_subject = { status: t1.status, data: JSON.stringify(t1.data).slice(0, 400) };
 
-  // Test 1: GET servicios por ID de prueba
-  const r0 = await wipFetch('/service/api/v1/Service/67379dff213b73f99523f061').catch(e=>({data:{err:e.message}}));
-  resultados.test0_getById = { status: r0.status, sample: JSON.stringify(r0.data).slice(0,300) };
+  const b2 = { pageSize: 5, page: 0, sort: 'scheduledDate', sortDirection: 'Desc', companyId: COMPANY_ID, userId: USER_ID,
+    filterValue: [{ property: 'customerDocument', value: ['1000988807'], operator: 'Equal' }] };
+  const t2 = await wipFetch('/service/api/v1/Service/search', 'POST', b2).catch(function(e) { return { status: 0, data: { err: e.message } }; });
+  out.fmt2_filterValue = { status: t2.status, data: JSON.stringify(t2.data).slice(0, 400) };
 
-  // Test 2: POST search con subject
-  const r1 = await wipFetch('/service/api/v1/Service/search','POST',{
-    pageSize:5, page:0, sort:'scheduledDate', sortDirection:'Desc',
-    companyId:'67379dff213b73f99523f061', userId:'67a0dcadba440e5f0db90ccc',
-    subject:'1000988807'
-  }).catch(e=>({data:{err:e.message}, status:0}));
-  resultados.test1_subject = { status: r1.status, sample: JSON.stringify(r1.data).slice(0,300) };
+  const b3 = { pageSize: 5, page: 0, sort: 'scheduledDate', sortDirection: 'Desc', companyId: COMPANY_ID, userId: USER_ID };
+  const t3 = await wipFetch('/service/api/v1/Service/search', 'POST', b3).catch(function(e) { return { status: 0, data: { err: e.message } }; });
+  out.fmt3_empty = { status: t3.status, data: JSON.stringify(t3.data).slice(0, 400) };
 
-  // Test 3: POST search con filterValue customerDocument
-  const r2 = await wipFetch('/service/api/v1/Service/search','POST',{
-    pageSize:5, page:0, sort:'scheduledDate', sortDirection:'Desc',
-    companyId:'67379dff213b73f99523f061', userId:'67a0dcadba440e5f0db90ccc',
-    filterValue:[{property:'customerDocument',value:['1000988807'],operator:'Equal'}]
-  }).catch(e=>({data:{err:e.message}, status:0}));
-  resultados.test2_filterDoc = { status: r2.status, sample: JSON.stringify(r2.data).slice(0,300) };
-
-  // Test 4: POST search vacío (todos los servicios)
-  const r3 = await wipFetch('/service/api/v1/Service/search','POST',{
-    pageSize:5, page:0, sort:'scheduledDate', sortDirection:'Desc',
-    companyId:'67379dff213b73f99523f061', userId:'67a0dcadba440e5f0db90ccc'
-  }).catch(e=>({data:{err:e.message}, status:0}));
-  resultados.test3_empty = { status: r3.status, sample: JSON.stringify(r3.data).slice(0,300) };
-
-  // Test 5: URL alternativa con companyId en path
-  const r4 = await wipFetch(`/service/api/v1/Service/company/67379dff213b73f99523f061`,'GET').catch(e=>({data:{err:e.message}, status:0}));
-  resultados.test4_companyPath = { status: r4.status, sample: JSON.stringify(r4.data).slice(0,300) };
-
-  res.json(resultados);
+  res.json(out);
 });
 
-app.get('/api/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime(), whatsapp: WA_NUM }));
+app.get('/api/health', function(req, res) { res.json({ status: 'ok', uptime: process.uptime() }); });
 
-app.listen(PORT, () => {
-  console.log(`✅ CLTIENE en http://localhost:${PORT}`);
-  console.log(`   WhatsApp: ${WA_NUM} via whapi.cloud`);
-  console.log(`   WIP: ${WIP_BASE}`);
+app.listen(PORT, function() {
+  console.log('✅ CLTIENE en http://localhost:' + PORT);
 });
 
 module.exports = app;
