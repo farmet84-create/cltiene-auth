@@ -181,29 +181,43 @@ app.get('/wip/business-units', async (req, res) => {
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// Buscar servicios — body exacto según documentación WIP
+// Buscar servicios
 app.post('/wip/services/search', async (req, res) => {
   try {
     const { subject='', businessUnitId='', pageSize=50, page=0, sort='scheduledDate', sortDirection='Desc' } = req.body;
 
-    // Body exacto según doc WIP v2.3
-    const searchBody = {
-      pageSize: pageSize,
-      page: page,
-      sort: sort,
-      sortDirection: sortDirection,
-      companyId: COMPANY_ID,
-      userId: USER_ID,
-      businessUnitId: businessUnitId,
-      subject: subject
-    };
+    // Intentar 3 formatos distintos hasta que uno funcione
+    const attempts = [
+      // Formato 1: subject directo
+      { pageSize, page, sort, sortDirection, companyId: COMPANY_ID, userId: USER_ID, businessUnitId, subject },
+      // Formato 2: filterValue con customerDocument
+      { pageSize, page, sort, sortDirection, companyId: COMPANY_ID, userId: USER_ID, businessUnitId,
+        filterValue: subject ? [{ property: 'customerDocument', value: [subject], operator: 'Equal' }] : [] },
+      // Formato 3: filterValue con userName
+      { pageSize, page, sort, sortDirection, companyId: COMPANY_ID, userId: USER_ID, businessUnitId,
+        filterValue: subject ? [{ property: 'userName', value: [subject], operator: 'Contains' }] : [] },
+    ];
 
-    console.log('[SEARCH] Body enviado:', JSON.stringify(searchBody));
-    const r = await wipFetch('/service/api/v1/Service/search', 'POST', searchBody);
-    console.log('[SEARCH] Respuesta:', r.status, JSON.stringify(r.data).slice(0,500));
+    let data = [];
+    let totalRows = 0;
+    for (const [i, body] of attempts.entries()) {
+      console.log(`[SEARCH] Intento ${i+1}:`, JSON.stringify(body));
+      const r = await wipFetch('/service/api/v1/Service/search', 'POST', body);
+      console.log(`[SEARCH] Respuesta ${i+1}:`, r.status, JSON.stringify(r.data).slice(0,400));
+      if (r.ok && r.data?.data?.length > 0) {
+        data = r.data.data;
+        totalRows = r.data.totalRows || data.length;
+        console.log(`[SEARCH] ✅ Formato ${i+1} funcionó, ${data.length} resultados`);
+        break;
+      }
+    }
 
-    const data = r.data?.data || [];
-    res.json({ data, totalRows: r.data?.totalRows || data.length });
+    res.json({ data, totalRows });
+  } catch(e) {
+    console.error('[SEARCH FATAL]', e.message);
+    res.status(500).json({ message: e.message });
+  }
+});
   } catch(e) {
     console.error('[SEARCH FATAL]', e.message);
     res.status(500).json({ message: e.message });
@@ -289,6 +303,44 @@ app.post('/api/notify', async (req, res) => {
   if (!telefono || !mensaje) return res.status(400).json({ success: false, message: 'telefono y mensaje requeridos' });
   const result = await sendWhatsApp(telefono, mensaje);
   res.json({ success: result.ok, ...result });
+});
+
+// Diagnóstico — prueba el endpoint de búsqueda con diferentes formatos
+app.get('/api/diag', async (req, res) => {
+  const resultados = {};
+
+  // Test 1: GET servicios por ID de prueba
+  const r0 = await wipFetch('/service/api/v1/Service/67379dff213b73f99523f061').catch(e=>({data:{err:e.message}}));
+  resultados.test0_getById = { status: r0.status, sample: JSON.stringify(r0.data).slice(0,300) };
+
+  // Test 2: POST search con subject
+  const r1 = await wipFetch('/service/api/v1/Service/search','POST',{
+    pageSize:5, page:0, sort:'scheduledDate', sortDirection:'Desc',
+    companyId:'67379dff213b73f99523f061', userId:'67a0dcadba440e5f0db90ccc',
+    subject:'1000988807'
+  }).catch(e=>({data:{err:e.message}, status:0}));
+  resultados.test1_subject = { status: r1.status, sample: JSON.stringify(r1.data).slice(0,300) };
+
+  // Test 3: POST search con filterValue customerDocument
+  const r2 = await wipFetch('/service/api/v1/Service/search','POST',{
+    pageSize:5, page:0, sort:'scheduledDate', sortDirection:'Desc',
+    companyId:'67379dff213b73f99523f061', userId:'67a0dcadba440e5f0db90ccc',
+    filterValue:[{property:'customerDocument',value:['1000988807'],operator:'Equal'}]
+  }).catch(e=>({data:{err:e.message}, status:0}));
+  resultados.test2_filterDoc = { status: r2.status, sample: JSON.stringify(r2.data).slice(0,300) };
+
+  // Test 4: POST search vacío (todos los servicios)
+  const r3 = await wipFetch('/service/api/v1/Service/search','POST',{
+    pageSize:5, page:0, sort:'scheduledDate', sortDirection:'Desc',
+    companyId:'67379dff213b73f99523f061', userId:'67a0dcadba440e5f0db90ccc'
+  }).catch(e=>({data:{err:e.message}, status:0}));
+  resultados.test3_empty = { status: r3.status, sample: JSON.stringify(r3.data).slice(0,300) };
+
+  // Test 5: URL alternativa con companyId en path
+  const r4 = await wipFetch(`/service/api/v1/Service/company/67379dff213b73f99523f061`,'GET').catch(e=>({data:{err:e.message}, status:0}));
+  resultados.test4_companyPath = { status: r4.status, sample: JSON.stringify(r4.data).slice(0,300) };
+
+  res.json(resultados);
 });
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok', uptime: process.uptime(), whatsapp: WA_NUM }));
