@@ -1,4 +1,4 @@
- require('dotenv').config();
+require('dotenv').config();
 const express = require('express');
 const path    = require('path');
 const app     = express();
@@ -145,48 +145,61 @@ app.get('/wip/business-units', async (req, res) => {
   } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// Búsqueda — prueba múltiples formatos
+// Búsqueda — businessUnitId es OBLIGATORIO, buscar en cada BU en paralelo
 app.post('/wip/services/search', async (req, res) => {
   try {
-    const subject      = req.body.subject      || '';
-    const businessUnitId = req.body.businessUnitId || '';
-    const pageSize     = req.body.pageSize     || 50;
-    const page         = req.body.page         || 0;
-    const sort         = req.body.sort         || 'scheduledDate';
-    const sortDirection= req.body.sortDirection|| 'Desc';
+    const subject       = req.body.subject       || '';
+    const businessUnitId= req.body.businessUnitId|| '';
+    const pageSize      = req.body.pageSize      || 50;
+    const page          = req.body.page          || 0;
+    const sort          = req.body.sort          || 'scheduledDate';
+    const sortDirection = req.body.sortDirection || 'Desc';
 
-    // Formato 1: subject
-    const body1 = { pageSize: pageSize, page: page, sort: sort, sortDirection: sortDirection, companyId: COMPANY_ID, userId: USER_ID, businessUnitId: businessUnitId, subject: subject };
-    const r1 = await wipFetch('/service/api/v1/Service/search', 'POST', body1);
-    console.log('[S1]', r1.status, JSON.stringify(r1.data).slice(0, 300));
-    if (r1.ok && r1.data && r1.data.data && r1.data.data.length > 0) {
-      return res.json({ data: r1.data.data, totalRows: r1.data.totalRows || r1.data.data.length });
+    // Obtener todos los BUs (businessUnitId es obligatorio en WIP)
+    let buIds = [];
+    if (businessUnitId) {
+      buIds = [businessUnitId];
+    } else {
+      const buRes = await wipFetch('/business/api/v1/BusinessUnit/company/' + COMPANY_ID + '/business-units/services');
+      buIds = (buRes.data.businessUnits || []).map(function(b) { return b.id; });
     }
 
-    // Formato 2: filterValue customerDocument
-    const body2 = { pageSize: pageSize, page: page, sort: sort, sortDirection: sortDirection, companyId: COMPANY_ID, userId: USER_ID,
-      filterValue: subject ? [{ property: 'customerDocument', value: [subject], operator: 'Equal' }] : [] };
-    const r2 = await wipFetch('/service/api/v1/Service/search', 'POST', body2);
-    console.log('[S2]', r2.status, JSON.stringify(r2.data).slice(0, 300));
-    if (r2.ok && r2.data && r2.data.data && r2.data.data.length > 0) {
-      return res.json({ data: r2.data.data, totalRows: r2.data.totalRows || r2.data.data.length });
-    }
+    console.log('[SEARCH] BUs a buscar:', buIds.length, '| subject:', subject);
 
-    // Formato 3: sin subject (traer todos)
-    const body3 = { pageSize: pageSize, page: page, sort: sort, sortDirection: sortDirection, companyId: COMPANY_ID, userId: USER_ID };
-    const r3 = await wipFetch('/service/api/v1/Service/search', 'POST', body3);
-    console.log('[S3]', r3.status, JSON.stringify(r3.data).slice(0, 300));
-    if (r3.ok && r3.data && r3.data.data) {
-      const all = r3.data.data;
-      const filtered = subject ? all.filter(function(s) {
-        return (s.customerDocument && s.customerDocument.includes(subject)) ||
-               (s.finalClientName && s.finalClientName.toLowerCase().includes(subject.toLowerCase())) ||
-               (s.plate && s.plate.toLowerCase().includes(subject.toLowerCase()));
-      }) : all;
-      return res.json({ data: filtered, totalRows: filtered.length });
-    }
+    // Buscar en cada BU con businessUnitId obligatorio
+    const promesas = buIds.map(function(buId) {
+      const body = {
+        pageSize: pageSize,
+        page: page,
+        sort: sort,
+        sortDirection: sortDirection,
+        companyId: COMPANY_ID,
+        userId: USER_ID,
+        businessUnitId: buId,
+        subject: subject
+      };
+      return wipFetch('/service/api/v1/Service/search', 'POST', body)
+        .then(function(r) {
+          console.log('[SEARCH] buId:', buId, '→', r.status, JSON.stringify(r.data).slice(0,200));
+          return (r.data && r.data.data) ? r.data.data : [];
+        })
+        .catch(function() { return []; });
+    });
 
-    res.json({ data: [], totalRows: 0, debug: { s1: r1.status, s2: r2.status, s3: r3.status } });
+    const resultados = await Promise.all(promesas);
+
+    // Combinar y deduplicar
+    const seen = new Set();
+    const data = [];
+    resultados.forEach(function(arr) {
+      arr.forEach(function(s) {
+        if (s && s.id && !seen.has(s.id)) { seen.add(s.id); data.push(s); }
+      });
+    });
+    data.sort(function(a,b) { return new Date(b.scheduledDate||0) - new Date(a.scheduledDate||0); });
+
+    console.log('[SEARCH] Total encontrados:', data.length);
+    res.json({ data: data, totalRows: data.length });
   } catch(e) {
     console.error('[SEARCH]', e.message);
     res.status(500).json({ message: e.message });
