@@ -1,230 +1,102 @@
 /**
- * CLTIENE Authentication Server
- * Backend Node.js — API REST con autenticación en 3 fases
- * Compatible con Hostinger VPS (Ubuntu 20/22)
+ * CLTIENE — WIP Dashboard Server
+ * Proxy completo para todos los endpoints de la API WIP v2.3
  */
 
 require('dotenv').config();
-const express    = require('express');
-const cors       = require('cors');
-const path       = require('path');
-const crypto     = require('crypto');
+const express = require('express');
+const path    = require('path');
+const app     = express();
+const PORT    = process.env.PORT || 3000;
 
-const app  = express();
-const PORT = process.env.PORT || 3000;
+const WIP_BASE    = 'https://api.wiptool.com';
+const WIP_KEY     = process.env.WIP_API_KEY    || 'xWjGb5Zt84g4YEBEe4C8ZxNWkVswJg7ZRbkLwJeQ';
+const COMPANY_ID  = process.env.WIP_COMPANY_ID || '67379dff213b73f99523f061';
+const USER_ID     = process.env.WIP_USER_ID    || '67a0dcadba440e5f0db90ccc';
+const BU_OWNER_ID = process.env.WIP_BUOWNER_ID || '67379dff213b73f99523f061';
 
-// ─── Middleware ──────────────────────────────────────────────────────────────
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(express.json());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(__dirname));
 
-// Sirve el HTML principal
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'cltiene-auth.html'));
-});
+app.get('/',    (req, res) => res.sendFile(path.join(__dirname, 'wip-dashboard.html')));
+app.get('/auth',(req, res) => res.sendFile(path.join(__dirname, 'cltiene-auth.html')));
 
-// ─── Almacenamiento temporal de códigos OTP ──────────────────────────────────
-// En producción usa Redis o MongoDB para persistir entre reinicios
-const otpStore = new Map(); // { documento: { code, expires, attempts } }
-
-// ─── Helper: generar código OTP ──────────────────────────────────────────────
-function generarOTP(longitud = 6) {
-  const digits = '0123456789';
-  let code = '';
-  for (let i = 0; i < longitud; i++) {
-    code += digits[crypto.randomInt(0, digits.length)];
-  }
-  return code;
+async function wipFetch(path, method = 'GET', body = null) {
+  const nodeFetch = (await import('node-fetch')).default;
+  const opts = { method, headers: { 'Authorization': WIP_KEY, 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const res  = await nodeFetch(WIP_BASE + path, opts);
+  const text = await res.text();
+  let data; try { data = JSON.parse(text); } catch { data = { raw: text }; }
+  return { ok: res.ok, status: res.status, data };
 }
 
-// ─── Helper: enmascarar teléfono ─────────────────────────────────────────────
-function maskPhone(phone) {
-  if (!phone) return '';
-  const clean = phone.replace(/\D/g, '');
-  return clean.slice(0, -4).replace(/./g, '*') + clean.slice(-4);
-}
-
-// ─── Helper: enviar WhatsApp via API WIP ─────────────────────────────────────
-async function enviarWhatsApp(telefono, mensaje) {
-  const API_URL  = process.env.WIP_API_URL   || 'https://api.wiptool.com';
-  const API_KEY  = process.env.WIP_API_KEY   || '';
-  const CLIENTE  = process.env.WIP_CLIENTE   || 'MULTISERVICIOS CL TIENE';
-
-  if (!API_KEY) {
-    console.log(`[DEMO] WhatsApp a ${telefono}: ${mensaje}`);
-    return { success: true, demo: true };
-  }
-
+// 1. Unidades de negocio
+app.get('/wip/business-units', async (req, res) => {
   try {
-    const fetch = (await import('node-fetch')).default;
-    const res = await fetch(`${API_URL}/v2/messages/whatsapp`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Api-Key': API_KEY,
-        'X-Client': CLIENTE,
-      },
-      body: JSON.stringify({ to: telefono, message: mensaje }),
-    });
-    const data = await res.json();
-    return { success: res.ok, data };
-  } catch (err) {
-    console.error('[WA Error]', err.message);
-    return { success: false, error: err.message };
-  }
-}
-
-// ─── Base de datos simulada (reemplaza con MongoDB/MySQL real) ────────────────
-// Estructura: { documento: { nombre, telefono, plan, estado, tipo } }
-const DB_USUARIOS = {
-  '1234567890': {
-    nombre: 'Juan García',
-    telefono: '+573001234567',
-    plan: 'Premium',
-    estado: 'Activo',
-    tipo: 'CC',
-  },
-  '0987654321': {
-    nombre: 'María López',
-    telefono: '+573009876543',
-    plan: 'Básico',
-    estado: 'Activo',
-    tipo: 'CC',
-  },
-  // Agrega más usuarios aquí o conecta tu base de datos real
-};
-
-// ─── ENDPOINT 1: Validar documento ───────────────────────────────────────────
-app.post('/api/auth/validate-document', async (req, res) => {
-  const { documento, tipo_documento } = req.body;
-
-  if (!documento || !tipo_documento) {
-    return res.status(400).json({ success: false, message: 'Documento y tipo requeridos.' });
-  }
-
-  const user = DB_USUARIOS[documento.trim()];
-
-  if (!user) {
-    return res.status(404).json({ success: false, message: 'Documento no encontrado en el sistema.' });
-  }
-
-  // Retornar datos parciales (sin enviar el código todavía)
-  res.json({
-    success: true,
-    user: {
-      nombre: user.nombre,
-      telefono: maskPhone(user.telefono),
-      plan: user.plan,
-      estado: user.estado,
-    },
-  });
+    const r = await wipFetch(`/business/api/v1/BusinessUnit/company/${COMPANY_ID}/business-units/services`);
+    res.status(r.status).json(r.data);
+  } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// ─── ENDPOINT 2: Enviar código OTP ───────────────────────────────────────────
-app.post('/api/auth/send-code', async (req, res) => {
-  const { documento, tipo_documento } = req.body;
-
-  if (!documento) {
-    return res.status(400).json({ success: false, message: 'Documento requerido.' });
-  }
-
-  const user = DB_USUARIOS[documento.trim()];
-  if (!user) {
-    return res.status(404).json({ success: false, message: 'Usuario no encontrado.' });
-  }
-
-  // Verificar si ya hay un código vigente (anti-spam: 60s entre intentos)
-  const existing = otpStore.get(documento);
-  if (existing && Date.now() < existing.expires - 60000) {
-    return res.status(429).json({
-      success: false,
-      message: 'Espera un momento antes de solicitar otro código.',
-    });
-  }
-
-  const code = generarOTP(6);
-  const expires = Date.now() + 2 * 60 * 1000; // 2 minutos
-
-  otpStore.set(documento, { code, expires, attempts: 0 });
-
-  const mensaje = `🔐 *CL TIENE - Código de Verificación*\n\nTu código es: *${code}*\n\nVálido por 2 minutos. No lo compartas con nadie.`;
-  const resultado = await enviarWhatsApp(user.telefono, mensaje);
-
-  console.log(`[OTP] ${documento} → código ${code} enviado a ${maskPhone(user.telefono)}`);
-
-  res.json({
-    success: true,
-    message: 'Código enviado por WhatsApp.',
-    demo: resultado.demo || false,
-  });
+// 2. Crear servicio
+app.post('/wip/services/create', async (req, res) => {
+  try {
+    const r = await wipFetch(`/service/api/v2/Service/${COMPANY_ID}/service/${USER_ID}`, 'POST', req.body);
+    res.status(r.status).json(r.data);
+  } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// ─── ENDPOINT 3: Verificar código OTP ────────────────────────────────────────
-app.post('/api/auth/verify-code', async (req, res) => {
-  const { documento, codigo } = req.body;
-
-  if (!documento || !codigo) {
-    return res.status(400).json({ success: false, message: 'Documento y código requeridos.' });
-  }
-
-  const stored = otpStore.get(documento);
-
-  if (!stored) {
-    return res.status(400).json({ success: false, message: 'No hay código activo. Solicita uno nuevo.' });
-  }
-
-  if (Date.now() > stored.expires) {
-    otpStore.delete(documento);
-    return res.status(400).json({ success: false, message: 'El código expiró. Solicita uno nuevo.' });
-  }
-
-  if (stored.attempts >= 3) {
-    otpStore.delete(documento);
-    return res.status(429).json({ success: false, message: 'Demasiados intentos. Solicita un nuevo código.' });
-  }
-
-  if (stored.code !== codigo.trim()) {
-    stored.attempts++;
-    const restantes = 3 - stored.attempts;
-    return res.status(400).json({
-      success: false,
-      message: `Código incorrecto. Te quedan ${restantes} intentos.`,
-    });
-  }
-
-  // ✅ Código correcto
-  otpStore.delete(documento);
-  const user = DB_USUARIOS[documento];
-
-  res.json({
-    success: true,
-    message: 'Autenticación exitosa.',
-    user: {
-      nombre: user.nombre,
-      telefono: user.telefono,
-      plan: user.plan,
-      estado: user.estado,
-    },
-  });
+// 3. Buscar por ID
+app.get('/wip/services/:id', async (req, res) => {
+  try {
+    const r = await wipFetch(`/service/api/v1/Service/${req.params.id}`);
+    res.status(r.status).json(r.data);
+  } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// ─── ENDPOINT 4: Reenviar código ─────────────────────────────────────────────
-app.post('/api/auth/resend-code', async (req, res) => {
-  const { documento, tipo_documento } = req.body;
-  // Reutiliza la lógica de send-code
-  req.url = '/api/auth/send-code';
-  app.handle(req, res);
+// 4. Buscar servicios
+app.post('/wip/services/search', async (req, res) => {
+  try {
+    const body = { pageSize: req.body.pageSize||20, page: req.body.page||0, sort: req.body.sort||'scheduledDate', sortDirection: req.body.sortDirection||'Desc', companyId: COMPANY_ID, userId: USER_ID, subject: req.body.subject||'', businessUnitId: req.body.businessUnitId||'' };
+    const r = await wipFetch('/service/api/v1/Service/search', 'POST', body);
+    res.status(r.status).json(r.data);
+  } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// ─── Health check ─────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
+// 5. Suscripciones
+app.get('/wip/subscriptions', async (req, res) => {
+  try {
+    const { companyId=COMPANY_ID, businessUnitId='', searchTerm='' } = req.query;
+    let url = `/Customer/api/v1/Customer/Subscription?companyId=${companyId}&searchTerm=${encodeURIComponent(searchTerm)}`;
+    if (businessUnitId) url += `&businessUnitId=${businessUnitId}`;
+    const r = await wipFetch(url);
+    res.status(r.status).json(r.data);
+  } catch(e) { res.status(500).json({ message: e.message }); }
 });
 
-// ─── Start ────────────────────────────────────────────────────────────────────
+// 6. Detalle suscripción
+app.post('/wip/subscriptions/detail', async (req, res) => {
+  try {
+    const body = { customerId: req.body.customerId, businessUnitId: req.body.businessUnitId, timeZone: 'America/Bogota', companyId: COMPANY_ID };
+    const r = await wipFetch('/Customer/api/v1/Customer/Subscription/Consumption', 'POST', body);
+    res.status(r.status).json(r.data);
+  } catch(e) { res.status(500).json({ message: e.message }); }
+});
+
+// 7. WebHook
+app.post('/wip/webhook', async (req, res) => {
+  try {
+    const r = await wipFetch('/status', 'POST', req.body);
+    res.status(r.status).json(r.data);
+  } catch(e) { res.status(500).json({ message: e.message }); }
+});
+
+app.get('/api/health', (req, res) => res.json({ status:'ok', uptime: process.uptime() }));
+
 app.listen(PORT, () => {
-  console.log(`✅ CLTIENE Auth Server corriendo en http://localhost:${PORT}`);
-  console.log(`   Modo: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`✅ CLTIENE WIP Dashboard en http://localhost:${PORT}`);
+  console.log(`   WIP Base: ${WIP_BASE} | Company: ${COMPANY_ID}`);
 });
 
 module.exports = app;
