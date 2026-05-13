@@ -809,3 +809,45 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 </body>
 </html>
+<style id="responsive-styles">
+@media (max-width: 900px) {
+  .sidebar { width: 56px; }
+  .sidebar-logo img, #logo-text { display: none !important; }
+  .sidebar-logo { justify-content: center; padding: 16px 8px; }
+  .nav-item span { display: none; }
+  .nav-item { justify-content: center; padding: 12px; }
+  .main { margin-left: 56px; }
+  .topbar { padding: 10px 16px; }
+  .content { padding: 16px; }
+  .panel-header { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .panel-header .btn { width: 100%; justify-content: center; }
+  .filters-bar { flex-direction: column; gap: 8px; }
+  .filters-bar select, .filters-bar input { width: 100%; }
+  .filter-group { width: 100%; }
+  .filter-group select { flex: 1; }
+  .form-row { flex-direction: column; }
+  .form-group { min-width: unset; width: 100%; }
+  .input-with-btn { flex-wrap: wrap; }
+  .input-with-btn input { min-width: 0; }
+  table { font-size: 12px; }
+  thead th, tbody td { padding: 8px 10px; }
+  /* Ocultar columnas menos importantes en móvil */
+  table th:nth-child(1), table td:nth-child(1),
+  table th:nth-child(3), table td:nth-child(3),
+  table th:nth-child(5), table td:nth-child(5),
+  table th:nth-child(6), table td:nth-child(6) { display: none; }
+  /* Grid destino/origen en columna */
+  .form-card [style*="grid-template-columns:1fr 1fr"] {
+    display: flex !important; flex-direction: column !important;
+  }
+  .form-actions { flex-direction: column; }
+  .form-actions .btn { width: 100%; justify-content: center; }
+  .stats { grid-template-columns: 1fr 1fr !important; }
+}
+
+@media (max-width: 500px) {
+  .topbar-title strong { font-size: 13px; }
+  .panel-header h1 { font-size: 18px; }
+  table th:nth-child(7), table td:nth-child(7) { display: none; }
+}
+</style>
